@@ -12,7 +12,7 @@
             transition: background .2s, transform .2s, border-color .2s;
         }
         .aether-settings-launcher:hover { background: #52525b; border-color: #71717a; transform: translateY(-2px); }
-        .aether-settings-launcher:focus-visible, .aether-settings-close:focus-visible { outline: 2px solid #22d3ee; outline-offset: 3px; }
+        .aether-settings-launcher:focus-visible, .aether-settings-close:focus-visible, .aether-theme-toggle:focus-visible { outline: 2px solid #22d3ee; outline-offset: 3px; }
         .aether-settings-backdrop {
             position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
             padding: 20px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(6px);
@@ -39,7 +39,35 @@
         .aether-settings-content p { margin:0; color:#a1a1aa; font:14px/1.6 Inter,sans-serif; }
         .aether-settings-row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:22px; padding:14px; border:1px solid #2a2a38; border-radius:12px; background:#101014; font:13px Inter,sans-serif; }
         .aether-settings-row span { color:#a1a1aa; }
-        @media (prefers-reduced-motion: reduce) { .aether-settings-launcher, .aether-settings-backdrop, .aether-settings-window { transition:none; } }
+        .aether-theme-toggle { position:relative; width:44px; height:24px; flex:none; padding:0; border:0; border-radius:999px; background:#52525b; cursor:pointer; transition:background .2s; }
+        .aether-theme-toggle::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:transform .2s; }
+        .aether-theme-toggle[aria-checked="true"] { background:#0891b2; }
+        .aether-theme-toggle[aria-checked="true"]::after { transform:translateX(20px); }
+
+        /* Tailwind utilities are fixed dark colors; override their neutral surfaces and text in light mode. */
+        html:not(.dark) body { background:#f4f6f8 !important; color:#18181b !important; color-scheme:light; }
+        html:not(.dark) [class~="bg-studio-950"] { background-color:#f4f6f8 !important; }
+        html:not(.dark) [class~="bg-studio-900"] { background-color:#ffffff !important; }
+        html:not(.dark) [class~="bg-studio-850"] { background-color:#f1f3f5 !important; }
+        html:not(.dark) [class~="bg-studio-800"] { background-color:#e4e7eb !important; }
+        html:not(.dark) [class~="bg-studio-700"] { background-color:#d1d5db !important; }
+        html:not(.dark) [class~="bg-studio-950/60"], html:not(.dark) [class~="bg-studio-950/70"] { background-color:#eef0f3 !important; }
+        html:not(.dark) [class~="bg-studio-850/70"], html:not(.dark) [class~="bg-studio-950/80"] { background-color:#f8fafc !important; }
+        html:not(.dark) [class~="bg-studio-900/90"] { background-color:rgb(255 255 255 / 92%) !important; }
+        html:not(.dark) [class~="text-white"], html:not(.dark) [class~="text-zinc-100"], html:not(.dark) [class~="text-zinc-200"] { color:#18181b !important; }
+        html:not(.dark) [class~="text-zinc-300"] { color:#3f3f46 !important; }
+        html:not(.dark) [class~="text-zinc-400"] { color:#52525b !important; }
+        html:not(.dark) [class~="text-zinc-500"] { color:#71717a !important; }
+        html:not(.dark) [class~="border-studio-800"], html:not(.dark) [class~="border-studio-800/80"], html:not(.dark) [class~="border-studio-800/90"], html:not(.dark) [class~="border-studio-700"] { border-color:#d4d7dc !important; }
+        html:not(.dark) [class~="bg-black/75"] { background-color:rgb(24 24 27 / 42%) !important; }
+        html:not(.dark) [class~="bg-studio-850"].aether-settings-window { background:#fff !important; }
+        html:not(.dark) .aether-settings-titlebar { background:#f1f3f5; border-color:#d4d7dc; }
+        html:not(.dark) .aether-settings-window { background:#fff; color:#18181b; border-color:#d4d7dc; }
+        html:not(.dark) .aether-settings-close, html:not(.dark) .aether-settings-row { background:#f1f3f5; color:#27272a; border-color:#d4d7dc; }
+        html:not(.dark) .aether-settings-content p, html:not(.dark) .aether-settings-row span { color:#52525b; }
+        html:not(.dark) .aether-settings-launcher { background:#d1d5db; color:#18181b; border-color:#a1a1aa; }
+        html:not(.dark) .aether-settings-launcher:hover { background:#c4c9d0; border-color:#71717a; }
+        @media (prefers-reduced-motion: reduce) { .aether-settings-launcher, .aether-settings-backdrop, .aether-settings-window, .aether-theme-toggle, .aether-theme-toggle::after { transition:none; } }
     `;
 
     const style = document.createElement('style');
@@ -64,15 +92,33 @@
             </header>
             <div class="aether-settings-content">
                 <h2 id="aether-settings-heading">Settings</h2>
-                <p>Your studio settings screen is ready. More preferences can be added here.</p>
-                <div class="aether-settings-row"><strong>Studio interface</strong><span>Dark mode</span></div>
+                <p>Personalize your studio experience.</p>
+                <div class="aether-settings-row">
+                    <div><strong>Light theme</strong><br><span id="aether-theme-description">Currently using dark theme</span></div>
+                    <button type="button" class="aether-theme-toggle" role="switch" aria-label="Enable light theme" aria-checked="false"></button>
+                </div>
                 <div class="aether-settings-row"><strong>Audio processing</strong><span>Local to this device</span></div>
             </div>
         </section>`;
 
     document.body.append(launcher, backdrop);
     const closeButton = backdrop.querySelector('.aether-settings-close');
+    const themeToggle = backdrop.querySelector('.aether-theme-toggle');
+    const themeDescription = backdrop.querySelector('#aether-theme-description');
     let previousFocus = null;
+
+    function setTheme(isLight) {
+        document.documentElement.classList.toggle('dark', !isLight);
+        document.documentElement.style.colorScheme = isLight ? 'light' : 'dark';
+        themeToggle.setAttribute('aria-checked', String(isLight));
+        themeToggle.setAttribute('aria-label', isLight ? 'Disable light theme' : 'Enable light theme');
+        themeDescription.textContent = `Currently using ${isLight ? 'light' : 'dark'} theme`;
+        try { localStorage.setItem('aetherstudio-theme', isLight ? 'light' : 'dark'); } catch (_) { /* Storage may be unavailable. */ }
+    }
+
+    let savedTheme = null;
+    try { savedTheme = localStorage.getItem('aetherstudio-theme'); } catch (_) { /* Storage may be unavailable. */ }
+    setTheme(savedTheme === 'light');
 
     function closeSettings() {
         backdrop.classList.remove('is-open');
@@ -87,6 +133,9 @@
         launcher.setAttribute('aria-expanded', 'true');
         document.body.style.overflow = 'hidden';
         closeButton.focus();
+    });
+    themeToggle.addEventListener('click', () => {
+        setTheme(themeToggle.getAttribute('aria-checked') !== 'true');
     });
     closeButton.addEventListener('click', closeSettings);
     backdrop.addEventListener('click', event => {
