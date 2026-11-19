@@ -1,195 +1,194 @@
-/* Persist Steal a Song's local library and resume position in this browser. */
+/* Persist the local music library, playlists, active playlist and resume position. */
 (() => {
     'use strict';
 
     const DB_NAME = 'steal-a-song-library';
-    const LEGACY_DB_NAME = 'aetherstudio-library';
     const DB_VERSION = 1;
     const TRACK_STORE = 'tracks';
     const STATE_STORE = 'state';
     const STATE_KEY = 'studio';
-    let databasePromise;
-    let lastSavedTrackIds = new Set();
-    let saveQueue = Promise.resolve();
+    const QUICK_STATE_KEY = 'steal-a-song-quick-state';
+    let dbPromise;
     let ready = false;
-    let initialized = false;
-
-    function migrateLegacyLibrary(db) {
-        return new Promise(resolve => {
-            let request;
-            try { request = indexedDB.open(LEGACY_DB_NAME); } catch (_) { resolve(); return; }
-            request.onerror = () => resolve();
-            request.onupgradeneeded = () => { request.transaction.abort(); };
-            request.onsuccess = () => {
-                const legacy = request.result;
-                if (!legacy.objectStoreNames.contains(TRACK_STORE) || !legacy.objectStoreNames.contains(STATE_STORE)) {
-                    legacy.close(); resolve(); return;
-                }
-                const readTx = legacy.transaction([TRACK_STORE, STATE_STORE], 'readonly');
-                const tracksReq = readTx.objectStore(TRACK_STORE).getAll();
-                const stateReq = readTx.objectStore(STATE_STORE).get(STATE_KEY);
-                readTx.oncomplete = () => {
-                    try {
-                        const writeTx = db.transaction([TRACK_STORE, STATE_STORE], 'readwrite');
-                        const trackStore = writeTx.objectStore(TRACK_STORE);
-                        tracksReq.result.forEach(track => trackStore.put(track));
-                        if (stateReq.result) writeTx.objectStore(STATE_STORE).put(stateReq.result);
-                        writeTx.oncomplete = () => {
-                            legacy.close();
-                            const removeLegacy = indexedDB.deleteDatabase(LEGACY_DB_NAME);
-                            removeLegacy.onsuccess = removeLegacy.onerror = removeLegacy.onblocked = () => resolve();
-                        };
-                        writeTx.onerror = writeTx.onabort = () => { legacy.close(); resolve(); };
-                    } catch (_) { legacy.close(); resolve(); }
-                };
-                readTx.onerror = readTx.onabort = () => { legacy.close(); resolve(); };
-            };
-        });
-    }
+    let saveTimer = 0;
+    let lastQuickSave = 0;
+    let savedTrackIds = new Set();
+    let saving = Promise.resolve();
 
     function openDatabase() {
-        if (databasePromise) return databasePromise;
-        databasePromise = new Promise((resolve, reject) => {
+        if (dbPromise) return dbPromise;
+        dbPromise = new Promise((resolve, reject) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
             request.onupgradeneeded = () => {
                 const db = request.result;
                 if (!db.objectStoreNames.contains(TRACK_STORE)) db.createObjectStore(TRACK_STORE, { keyPath: 'id' });
                 if (!db.objectStoreNames.contains(STATE_STORE)) db.createObjectStore(STATE_STORE, { keyPath: 'key' });
             };
-            request.onsuccess = async () => {
-                const db = request.result;
-                try { await migrateLegacyLibrary(db); } catch (_) { }
-                resolve(db);
-            };
-            request.onerror = () => reject(request.error || new Error('Could not open local music storage.'));
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('Unable to open local music storage.'));
         });
-        return databasePromise;
+        return dbPromise;
     }
 
-    function requestResult(request) {
+    function requestValue(request) {
         return new Promise((resolve, reject) => {
             request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error || new Error('Local music storage request failed.'));
+            request.onerror = () => reject(request.error || new Error('Unable to read local music storage.'));
         });
     }
 
-    async function readSavedState(db) {
-        const tx = db.transaction([TRACK_STORE, STATE_STORE], 'readonly');
-        const trackRequest = tx.objectStore(TRACK_STORE).getAll();
-        const stateRequest = tx.objectStore(STATE_STORE).get(STATE_KEY);
-        const [savedTracks, savedState] = await Promise.all([requestResult(trackRequest), requestResult(stateRequest)]);
-        return { savedTracks, savedState: savedState || null };
+    function snapshot() {
+        return {
+            key: STATE_KEY,
+            playlists: state.playlists.map(playlist => ({
+                id: playlist.id,
+                name: playlist.name,
+                trackIds: [...playlist.trackIds]
+            })),
+            activePlaylistId: state.activePlaylistId,
+            currentTrackId: state.currentTrackId,
+            position: state.currentTrackId && Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0,
+            savedAt: Date.now()
+        };
     }
 
-    function restoreDSPDefaults() {
-        state.activePreset = 'normal';
-        state.dsp.speed = 1;
-        state.dsp.resamplePitch = true;
-        state.dsp.eq = [0, 0, 0, 0, 0];
-        state.dsp.reverb = 0;
-        state.dsp.pan = 0;
-        state.dsp.autoPan = false;
-        state.dsp.lowpass = 20000;
+    function saveQuickState() {
+        if (!ready) return;
+        try { localStorage.setItem(QUICK_STATE_KEY, JSON.stringify(snapshot())); } catch (_) { }
     }
 
-    async function restoreLibrary() {
+    async function persist() {
+        if (!ready) return;
         const db = await openDatabase();
-        const { savedTracks, savedState } = await readSavedState(db);
-        lastSavedTrackIds = new Set(savedTracks.map(track => track.id));
-        const restoredTracks = [];
+        const tx = db.transaction([TRACK_STORE, STATE_STORE], 'readwrite');
+        const tracks = tx.objectStore(TRACK_STORE);
+        const currentIds = new Set(state.tracks.map(track => track.id));
+        const addedIds = [];
+        for (const track of state.tracks) {
+            if (track.file && !savedTrackIds.has(track.id)) {
+                tracks.put({ id: track.id, name: track.name, format: track.format, duration: track.duration, fileName: track.file.name, file: track.file });
+                addedIds.push(track.id);
+            }
+        }
+        for (const id of savedTrackIds) if (!currentIds.has(id)) tracks.delete(id);
+        tx.objectStore(STATE_STORE).put(snapshot());
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = tx.onabort = () => reject(tx.error || new Error('Unable to save the local library.'));
+        });
+        addedIds.forEach(id => savedTrackIds.add(id));
+        for (const id of savedTrackIds) if (!currentIds.has(id)) savedTrackIds.delete(id);
+    }
+
+    function scheduleSave(immediate = false) {
+        if (!ready) return;
+        saveQuickState();
+        clearTimeout(saveTimer);
+        const run = () => {
+            saving = saving.then(persist).catch(error => console.warn('Could not save Steal a Song library:', error));
+        };
+        if (immediate) run();
+        else saveTimer = setTimeout(run, 350);
+    }
+
+    async function restore() {
+        const db = await openDatabase();
+        const tx = db.transaction([TRACK_STORE, STATE_STORE], 'readonly');
+        const [savedTracks, dbState] = await Promise.all([
+            requestValue(tx.objectStore(TRACK_STORE).getAll()),
+            requestValue(tx.objectStore(STATE_STORE).get(STATE_KEY))
+        ]);
+        savedTrackIds = new Set(savedTracks.map(track => track.id));
+        const validTracks = [];
         for (const saved of savedTracks) {
-            if (!(saved.file instanceof Blob)) continue;
+            if (!saved.file || !(saved.file instanceof Blob)) continue;
             const filename = saved.fileName || `${saved.name || 'Audio'}.${(saved.format || 'audio').toLowerCase()}`;
             const file = saved.file instanceof File ? saved.file : new File([saved.file], filename, { type: saved.file.type || 'audio/*' });
-            restoredTracks.push({ id: saved.id, name: saved.name || filename.replace(/\.[^.]+$/, ''), format: saved.format || 'AUDIO', duration: Number(saved.duration) || 0, file, url: URL.createObjectURL(file) });
+            validTracks.push({
+                id: saved.id,
+                name: saved.name || filename.replace(/\.[^.]+$/, ''),
+                format: saved.format || 'AUDIO',
+                duration: Number(saved.duration) || 0,
+                file,
+                url: URL.createObjectURL(file)
+            });
         }
-        state.tracks = restoredTracks;
-        const validIds = new Set(restoredTracks.map(track => track.id));
-        const savedPlaylists = savedState && Array.isArray(savedState.playlists) ? savedState.playlists : null;
-        if (savedPlaylists && savedPlaylists.length) {
-            const allTracks = savedPlaylists.find(playlist => playlist.id === 'all') || { id: 'all', name: 'All Tracks', trackIds: [] };
-            state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: allTracks.trackIds.filter(id => validIds.has(id)) }, ...savedPlaylists.filter(playlist => playlist.id !== 'all' && typeof playlist.name === 'string').map(playlist => ({ id: playlist.id, name: playlist.name, trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds.filter(id => validIds.has(id)) : [] }))];
-        } else state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: restoredTracks.map(track => track.id) }];
-        const activeId = savedState && savedState.activePlaylistId;
-        state.activePlaylistId = state.playlists.some(playlist => playlist.id === activeId) ? activeId : 'all';
-        const trackId = savedState && validIds.has(savedState.currentTrackId) ? savedState.currentTrackId : null;
+        state.tracks = validTracks;
+        const validIds = new Set(validTracks.map(track => track.id));
+        let quickState = null;
+        try { quickState = JSON.parse(localStorage.getItem(QUICK_STATE_KEY) || 'null'); } catch (_) { }
+        const savedState = quickState && quickState.savedAt >= (dbState?.savedAt || 0) ? quickState : dbState;
+        const storedPlaylists = Array.isArray(savedState?.playlists) ? savedState.playlists : null;
+        if (storedPlaylists?.length) {
+            const all = storedPlaylists.find(playlist => playlist.id === 'all');
+            state.playlists = [{
+                id: 'all', name: 'All Tracks',
+                trackIds: Array.isArray(all?.trackIds) ? all.trackIds.filter(id => validIds.has(id)) : validTracks.map(track => track.id)
+            }, ...storedPlaylists.filter(playlist => playlist.id !== 'all' && typeof playlist.name === 'string').map(playlist => ({
+                id: playlist.id,
+                name: playlist.name,
+                trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds.filter(id => validIds.has(id)) : []
+            }))];
+        } else {
+            state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: validTracks.map(track => track.id) }];
+        }
+        state.activePlaylistId = state.playlists.some(playlist => playlist.id === savedState?.activePlaylistId) ? savedState.activePlaylistId : 'all';
+
+        // Always start with normal DSP; restore the selected song and position, but never autoplay.
+        state.activePreset = 'normal';
+        Object.assign(state.dsp, { speed: 1, resamplePitch: true, eq: [0, 0, 0, 0, 0], reverb: 0, pan: 0, autoPan: false, lowpass: 20000 });
         state.currentTrackId = null;
         state.isPlaying = false;
-        restoreDSPDefaults();
+        const trackId = validIds.has(savedState?.currentTrackId) ? savedState.currentTrackId : null;
+        if (trackId) {
+            const resumeAt = Math.max(0, Number(savedState.position) || 0);
+            const onMetadata = () => {
+                if (state.currentTrackId !== trackId) return;
+                const maxPosition = Number.isFinite(audioEl.duration) ? Math.max(0, audioEl.duration - 0.1) : resumeAt;
+                try { audioEl.currentTime = Math.min(resumeAt, maxPosition); } catch (_) { }
+                state.isPlaying = false;
+                if (typeof updateTransportUI === 'function') updateTransportUI();
+                if (typeof renderTrackList === 'function') renderTrackList();
+                scheduleSave(true);
+            };
+            audioEl.addEventListener('loadedmetadata', onMetadata, { once: true });
+            loadTrack(trackId, false);
+            if (audioEl.readyState >= 1) onMetadata();
+        }
+        ready = true;
         if (typeof renderPlaylists === 'function') renderPlaylists();
         if (typeof renderTrackList === 'function') renderTrackList();
         if (typeof syncControlsFromState === 'function') syncControlsFromState();
         if (typeof renderPresetButtons === 'function') renderPresetButtons();
-        if (trackId && typeof loadTrack === 'function') {
-            const resumeAt = Number(savedState.position) || 0;
-            loadTrack(trackId, false);
-            audioEl.addEventListener('loadedmetadata', () => {
-                if (state.currentTrackId !== trackId) return;
-                const upperBound = Number.isFinite(audioEl.duration) ? Math.max(0, audioEl.duration - 0.1) : resumeAt;
-                try { audioEl.currentTime = Math.min(resumeAt, upperBound); } catch (_) { }
-                state.isPlaying = false;
-                if (typeof updateTransportUI === 'function') updateTransportUI();
-            }, { once: true });
-        }
-        ready = true;
     }
 
-    function currentSnapshot() {
-        return { key: STATE_KEY, playlists: state.playlists.map(playlist => ({ id: playlist.id, name: playlist.name, trackIds: [...playlist.trackIds] })), activePlaylistId: state.activePlaylistId, currentTrackId: state.currentTrackId, position: state.currentTrackId && Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0, savedAt: Date.now() };
-    }
-
-    async function persistSnapshot() {
-        if (!ready || !databasePromise) return;
-        const db = await openDatabase();
-        const presentIds = new Set(state.tracks.map(track => track.id));
-        const tx = db.transaction([TRACK_STORE, STATE_STORE], 'readwrite');
-        const trackStore = tx.objectStore(TRACK_STORE);
-        for (const track of state.tracks) {
-            if (!track.file || lastSavedTrackIds.has(track.id)) continue;
-            trackStore.put({ id: track.id, name: track.name, format: track.format, duration: track.duration, fileName: track.file.name, file: track.file });
-            lastSavedTrackIds.add(track.id);
-        }
-        for (const id of lastSavedTrackIds) {
-            if (!presentIds.has(id)) { trackStore.delete(id); lastSavedTrackIds.delete(id); }
-        }
-        tx.objectStore(STATE_STORE).put(currentSnapshot());
-        await new Promise((resolve, reject) => {
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error || new Error('Could not save your library.'));
-            tx.onabort = () => reject(tx.error || new Error('Could not save your library.'));
-        });
-    }
-
-    function scheduleSave() {
-        if (!ready) return;
-        saveQueue = saveQueue.then(() => persistSnapshot()).catch(error => {
-            console.warn('Steal a Song could not save the local library:', error);
-            if (typeof showToast === 'function') showToast('Could not save your music. Check available browser storage.', 'warn');
-        });
-    }
-
-    function installPersistence() {
-        if (initialized) return;
-        initialized = true;
+    function initialize() {
+        if (!('indexedDB' in window) || !('File' in window) || typeof state === 'undefined') return;
         const appOnload = window.onload;
         window.onload = async function (event) {
-            try { await restoreLibrary(); } catch (error) { console.warn('Steal a Song could not restore the local library:', error); ready = true; }
+            try {
+                await restore();
+            } catch (error) {
+                console.warn('Could not restore Steal a Song library:', error);
+                ready = true;
+            }
             if (typeof appOnload === 'function') appOnload.call(this, event);
             if (typeof applyPreset === 'function') applyPreset('normal');
-            scheduleSave();
+            scheduleSave(true);
         };
-        audioEl.addEventListener('timeupdate', scheduleSave);
-        audioEl.addEventListener('pause', scheduleSave);
-        audioEl.addEventListener('play', scheduleSave);
-        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') scheduleSave(); });
-        window.addEventListener('pagehide', scheduleSave);
-        window.setInterval(scheduleSave, 1000);
+        audioEl.addEventListener('timeupdate', () => {
+            if (Date.now() - lastQuickSave > 700) {
+                lastQuickSave = Date.now();
+                scheduleSave();
+            }
+        });
+        ['pause', 'play', 'loadedmetadata'].forEach(type => audioEl.addEventListener(type, () => scheduleSave(true)));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') scheduleSave(true);
+        });
+        window.addEventListener('pagehide', () => scheduleSave(true));
+        window.setInterval(() => scheduleSave(), 1500);
     }
 
-    try {
-        if (!('indexedDB' in window) || !('File' in window)) return;
-        installPersistence();
-    } catch (error) {
-        console.warn('Steal a Song persistence is unavailable:', error);
-    }
+    initialize();
 })();
