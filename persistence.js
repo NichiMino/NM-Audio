@@ -1,18 +1,51 @@
-/* Persist AetherStudio's local library and resume position in this browser. */
+/* Persist Steal a Song's local library and resume position in this browser. */
 (() => {
     'use strict';
 
-    const DB_NAME = 'aetherstudio-library';
+    const DB_NAME = 'steal-a-song-library';
+    const LEGACY_DB_NAME = 'aetherstudio-library';
     const DB_VERSION = 1;
     const TRACK_STORE = 'tracks';
     const STATE_STORE = 'state';
     const STATE_KEY = 'studio';
-
     let databasePromise;
     let lastSavedTrackIds = new Set();
     let saveQueue = Promise.resolve();
     let ready = false;
     let initialized = false;
+
+    function migrateLegacyLibrary(db) {
+        return new Promise(resolve => {
+            let request;
+            try { request = indexedDB.open(LEGACY_DB_NAME); } catch (_) { resolve(); return; }
+            request.onerror = () => resolve();
+            request.onupgradeneeded = () => { request.transaction.abort(); };
+            request.onsuccess = () => {
+                const legacy = request.result;
+                if (!legacy.objectStoreNames.contains(TRACK_STORE) || !legacy.objectStoreNames.contains(STATE_STORE)) {
+                    legacy.close(); resolve(); return;
+                }
+                const readTx = legacy.transaction([TRACK_STORE, STATE_STORE], 'readonly');
+                const tracksReq = readTx.objectStore(TRACK_STORE).getAll();
+                const stateReq = readTx.objectStore(STATE_STORE).get(STATE_KEY);
+                readTx.oncomplete = () => {
+                    try {
+                        const writeTx = db.transaction([TRACK_STORE, STATE_STORE], 'readwrite');
+                        const trackStore = writeTx.objectStore(TRACK_STORE);
+                        tracksReq.result.forEach(track => trackStore.put(track));
+                        if (stateReq.result) writeTx.objectStore(STATE_STORE).put(stateReq.result);
+                        writeTx.oncomplete = () => {
+                            legacy.close();
+                            const removeLegacy = indexedDB.deleteDatabase(LEGACY_DB_NAME);
+                            removeLegacy.onsuccess = removeLegacy.onerror = removeLegacy.onblocked = () => resolve();
+                        };
+                        writeTx.onerror = writeTx.onabort = () => { legacy.close(); resolve(); };
+                    } catch (_) { legacy.close(); resolve(); }
+                };
+                readTx.onerror = readTx.onabort = () => { legacy.close(); resolve(); };
+            };
+        });
+    }
 
     function openDatabase() {
         if (databasePromise) return databasePromise;
@@ -23,7 +56,11 @@
                 if (!db.objectStoreNames.contains(TRACK_STORE)) db.createObjectStore(TRACK_STORE, { keyPath: 'id' });
                 if (!db.objectStoreNames.contains(STATE_STORE)) db.createObjectStore(STATE_STORE, { keyPath: 'key' });
             };
-            request.onsuccess = () => resolve(request.result);
+            request.onsuccess = async () => {
+                const db = request.result;
+                try { await migrateLegacyLibrary(db); } catch (_) { }
+                resolve(db);
+            };
             request.onerror = () => reject(request.error || new Error('Could not open local music storage.'));
         });
         return databasePromise;
@@ -53,58 +90,32 @@
         state.dsp.pan = 0;
         state.dsp.autoPan = false;
         state.dsp.lowpass = 20000;
-        // Keep user volume and crossfade settings; reset the creative effects.
     }
 
     async function restoreLibrary() {
         const db = await openDatabase();
         const { savedTracks, savedState } = await readSavedState(db);
-        const savedById = new Map(savedTracks.map(track => [track.id, track]));
-        lastSavedTrackIds = new Set(savedById.keys());
-
+        lastSavedTrackIds = new Set(savedTracks.map(track => track.id));
         const restoredTracks = [];
         for (const saved of savedTracks) {
             if (!(saved.file instanceof Blob)) continue;
             const filename = saved.fileName || `${saved.name || 'Audio'}.${(saved.format || 'audio').toLowerCase()}`;
-            const file = saved.file instanceof File
-                ? saved.file
-                : new File([saved.file], filename, { type: saved.file.type || 'audio/*' });
-            restoredTracks.push({
-                id: saved.id,
-                name: saved.name || filename.replace(/\.[^.]+$/, ''),
-                format: saved.format || 'AUDIO',
-                duration: Number(saved.duration) || 0,
-                file,
-                url: URL.createObjectURL(file)
-            });
+            const file = saved.file instanceof File ? saved.file : new File([saved.file], filename, { type: saved.file.type || 'audio/*' });
+            restoredTracks.push({ id: saved.id, name: saved.name || filename.replace(/\.[^.]+$/, ''), format: saved.format || 'AUDIO', duration: Number(saved.duration) || 0, file, url: URL.createObjectURL(file) });
         }
-
         state.tracks = restoredTracks;
         const validIds = new Set(restoredTracks.map(track => track.id));
         const savedPlaylists = savedState && Array.isArray(savedState.playlists) ? savedState.playlists : null;
         if (savedPlaylists && savedPlaylists.length) {
             const allTracks = savedPlaylists.find(playlist => playlist.id === 'all') || { id: 'all', name: 'All Tracks', trackIds: [] };
-            state.playlists = [
-                { id: 'all', name: 'All Tracks', trackIds: allTracks.trackIds.filter(id => validIds.has(id)) },
-                ...savedPlaylists
-                    .filter(playlist => playlist.id !== 'all' && typeof playlist.name === 'string')
-                    .map(playlist => ({
-                        id: playlist.id,
-                        name: playlist.name,
-                        trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds.filter(id => validIds.has(id)) : []
-                    }))
-            ];
-        } else {
-            state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: restoredTracks.map(track => track.id) }];
-        }
-
+            state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: allTracks.trackIds.filter(id => validIds.has(id)) }, ...savedPlaylists.filter(playlist => playlist.id !== 'all' && typeof playlist.name === 'string').map(playlist => ({ id: playlist.id, name: playlist.name, trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds.filter(id => validIds.has(id)) : [] }))];
+        } else state.playlists = [{ id: 'all', name: 'All Tracks', trackIds: restoredTracks.map(track => track.id) }];
         const activeId = savedState && savedState.activePlaylistId;
         state.activePlaylistId = state.playlists.some(playlist => playlist.id === activeId) ? activeId : 'all';
         const trackId = savedState && validIds.has(savedState.currentTrackId) ? savedState.currentTrackId : null;
         state.currentTrackId = null;
         state.isPlaying = false;
         restoreDSPDefaults();
-
         if (typeof renderPlaylists === 'function') renderPlaylists();
         if (typeof renderTrackList === 'function') renderTrackList();
         if (typeof syncControlsFromState === 'function') syncControlsFromState();
@@ -120,23 +131,11 @@
                 if (typeof updateTransportUI === 'function') updateTransportUI();
             }, { once: true });
         }
-
         ready = true;
     }
 
     function currentSnapshot() {
-        return {
-            key: STATE_KEY,
-            playlists: state.playlists.map(playlist => ({
-                id: playlist.id,
-                name: playlist.name,
-                trackIds: [...playlist.trackIds]
-            })),
-            activePlaylistId: state.activePlaylistId,
-            currentTrackId: state.currentTrackId,
-            position: state.currentTrackId && Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0,
-            savedAt: Date.now()
-        };
+        return { key: STATE_KEY, playlists: state.playlists.map(playlist => ({ id: playlist.id, name: playlist.name, trackIds: [...playlist.trackIds] })), activePlaylistId: state.activePlaylistId, currentTrackId: state.currentTrackId, position: state.currentTrackId && Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0, savedAt: Date.now() };
     }
 
     async function persistSnapshot() {
@@ -145,24 +144,13 @@
         const presentIds = new Set(state.tracks.map(track => track.id));
         const tx = db.transaction([TRACK_STORE, STATE_STORE], 'readwrite');
         const trackStore = tx.objectStore(TRACK_STORE);
-
         for (const track of state.tracks) {
             if (!track.file || lastSavedTrackIds.has(track.id)) continue;
-            trackStore.put({
-                id: track.id,
-                name: track.name,
-                format: track.format,
-                duration: track.duration,
-                fileName: track.file.name,
-                file: track.file
-            });
+            trackStore.put({ id: track.id, name: track.name, format: track.format, duration: track.duration, fileName: track.file.name, file: track.file });
             lastSavedTrackIds.add(track.id);
         }
         for (const id of lastSavedTrackIds) {
-            if (!presentIds.has(id)) {
-                trackStore.delete(id);
-                lastSavedTrackIds.delete(id);
-            }
+            if (!presentIds.has(id)) { trackStore.delete(id); lastSavedTrackIds.delete(id); }
         }
         tx.objectStore(STATE_STORE).put(currentSnapshot());
         await new Promise((resolve, reject) => {
@@ -174,12 +162,10 @@
 
     function scheduleSave() {
         if (!ready) return;
-        saveQueue = saveQueue
-            .then(() => persistSnapshot())
-            .catch(error => {
-                console.warn('AetherStudio could not save the local library:', error);
-                if (typeof showToast === 'function') showToast('Could not save your music. Check available browser storage.', 'warn');
-            });
+        saveQueue = saveQueue.then(() => persistSnapshot()).catch(error => {
+            console.warn('Steal a Song could not save the local library:', error);
+            if (typeof showToast === 'function') showToast('Could not save your music. Check available browser storage.', 'warn');
+        });
     }
 
     function installPersistence() {
@@ -187,35 +173,23 @@
         initialized = true;
         const appOnload = window.onload;
         window.onload = async function (event) {
-            try {
-                await restoreLibrary();
-            } catch (error) {
-                console.warn('AetherStudio could not restore the local library:', error);
-                ready = true;
-            }
+            try { await restoreLibrary(); } catch (error) { console.warn('Steal a Song could not restore the local library:', error); ready = true; }
             if (typeof appOnload === 'function') appOnload.call(this, event);
-            // A preset is deliberately not restored: each visit starts with clean, neutral FX.
             if (typeof applyPreset === 'function') applyPreset('normal');
             scheduleSave();
         };
-
         audioEl.addEventListener('timeupdate', scheduleSave);
         audioEl.addEventListener('pause', scheduleSave);
         audioEl.addEventListener('play', scheduleSave);
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') scheduleSave();
-        });
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') scheduleSave(); });
         window.addEventListener('pagehide', scheduleSave);
         window.setInterval(scheduleSave, 1000);
     }
 
     try {
-        if (!('indexedDB' in window) || !('File' in window)) {
-            console.warn('This browser does not support persistent local music storage.');
-            return;
-        }
+        if (!('indexedDB' in window) || !('File' in window)) return;
         installPersistence();
     } catch (error) {
-        console.warn('AetherStudio persistence is unavailable:', error);
+        console.warn('Steal a Song persistence is unavailable:', error);
     }
 })();
