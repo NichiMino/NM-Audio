@@ -104,18 +104,43 @@
     document.documentElement.classList.toggle('steal-reduced-motion',prefs.reducedMotion===true);motion.textContent=prefs.reducedMotion?'Disable':'Enable';
     visualizer.value=prefs.visualizer||'bars';crossfade.value=prefs.crossfade||'0';volume.value=['25','50','75','100','125','150'].includes(String(prefs.defaultVolume))?String(prefs.defaultVolume):'100';
 
-    // Apply the complete app name to visible DOM text and document metadata.
-    function renameApp(root=document){
-      if(document.title.includes('AetherStudio')||document.title.includes('AtherStudio'))document.title='Steal a Song — Local Audio Remix & DJ Deck';
-      const title=document.querySelector('h1');if(title&&/(AetherStudio|AtherStudio)/i.test(title.textContent))title.textContent='Steal a Song';
-      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
-      const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
-      for(const node of nodes){node.nodeValue=node.nodeValue.replace(/AetherStudio|AtherStudio/g,'Steal a Song')}
+    // Replace lines 107–116 with:
+function renameApp(root = document) {
+    if (document.title.includes('AetherStudio') || document.title.includes('AtherStudio')) {
+        document.title = 'Steal a Song — Local Audio Remix & DJ Deck';
     }
-    renameApp();
-    new MutationObserver(()=>renameApp()).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
 
-    window.addEventListener('load',()=>{const viz=document.querySelector(`.viz-mode-btn[data-viz="${prefs.visualizer||'bars'}"]`);viz?.click();const cf=document.getElementById('crossfade-slider');if(cf){cf.value=prefs.crossfade||0;cf.dispatchEvent(new Event('input',{bubbles:true}))}refreshStorage();renameApp()});
+    const title = document.querySelector('h1');
+    if (title && /(AetherStudio|AtherStudio)/i.test(title.textContent)) {
+        title.textContent = 'Steal a Song';
+    }
 
-    const persistence=document.createElement('script');persistence.src='persistence.js';persistence.defer=true;document.body.appendChild(persistence);
-})();
+    if (root.nodeType === Node.TEXT_NODE) {
+        root.nodeValue = root.nodeValue.replace(/AetherStudio|AtherStudio/g, 'Steal a Song');
+        return;
+    }
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+        walker.currentNode.nodeValue =
+            walker.currentNode.nodeValue.replace(/AetherStudio|AtherStudio/g, 'Steal a Song');
+    }
+}
+
+renameApp();
+
+new MutationObserver(records => {
+    for (const record of records) {
+        if (record.type === 'characterData') {
+            if (/AetherStudio|AtherStudio/.test(record.target.nodeValue)) {
+                renameApp(record.target);
+            }
+        } else {
+            record.addedNodes.forEach(node => renameApp(node));
+        }
+    }
+}).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true
+});
