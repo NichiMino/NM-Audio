@@ -23,11 +23,11 @@
       input[type=range]::-moz-range-thumb{background:#e4e4e7!important;box-shadow:0 0 8px #a1a1aa!important}
       #visualizer-canvas{filter:grayscale(1)}
       ::selection{background:#52525b!important;color:#fff!important}
-      .settings-tab-backdrop{position:fixed;inset:0;z-index:100;display:none;justify-content:flex-end;background:#0009;backdrop-filter:blur(3px)}
-      .settings-tab-backdrop.is-open{display:flex}
-      .settings-tab-panel{width:min(420px,100%);height:100%;padding:24px;background:#111113;color:#f4f4f5;border-left:1px solid #3f3f46;box-shadow:-20px 0 60px #0008;font-family:Inter,sans-serif;transform:translateX(100%);transition:transform .2s ease}
+      .settings-tab-backdrop{position:fixed;inset:0;z-index:100;display:flex;justify-content:flex-end;background:#0009;backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity 140ms ease,visibility 140ms ease}
+      .settings-tab-backdrop.is-open{opacity:1;visibility:visible}
+      .settings-tab-panel{width:min(420px,100%);height:100%;padding:24px;box-sizing:border-box;background:#111113;color:#f4f4f5;border-left:1px solid #3f3f46;box-shadow:-20px 0 60px #0008;font-family:Inter,sans-serif;transform:translateX(100%);transition:transform 160ms cubic-bezier(.2,.8,.2,1)}
       .settings-tab-backdrop.is-open .settings-tab-panel{transform:translateX(0)}
-      @media(prefers-reduced-motion:reduce){.settings-tab-panel{transition:none}}
+      @media(prefers-reduced-motion:reduce){.settings-tab-backdrop,.settings-tab-panel{transition:none}}
     `;
     document.head.appendChild(theme);
 
@@ -97,7 +97,6 @@
         backdrop.className = 'settings-tab-backdrop';
         backdrop.innerHTML = '<section class="settings-tab-panel" role="dialog" aria-modal="true" aria-labelledby="settings-tab-title"><header style="display:flex;align-items:center;justify-content:space-between;padding-bottom:18px;border-bottom:1px solid #27272a"><h2 id="settings-tab-title" style="margin:0;font-size:20px;font-weight:600">Settings</h2><button type="button" aria-label="Close settings" style="width:36px;height:36px;border:1px solid #52525b;border-radius:9px;background:#27272a;color:#f4f4f5;font-size:20px;cursor:pointer">×</button></header></section>';
         const close = backdrop.querySelector('button');
-        const panel = backdrop.querySelector('.settings-tab-panel');
         let previouslyFocused = null;
         const open = () => {
             previouslyFocused = document.activeElement;
