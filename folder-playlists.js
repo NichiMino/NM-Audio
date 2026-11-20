@@ -2,7 +2,7 @@
 (() => {
     'use strict';
 
-    const COLOR_KEY = 'steal-a-song-playlist-colors';
+    const COLOR_KEY = 'nm-audio-playlist-colors';
     const AUDIO_EXT = /\.(mp3|wav|ogg|flac|m4a|aac|webm)$/i;
 
     // Persistence is loaded after the inline application has defined its state and onload handler.
