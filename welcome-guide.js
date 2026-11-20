@@ -102,20 +102,19 @@
         if (event.key === 'Escape' && backdrop.classList.contains('is-open')) closeGuide();
     });
 
-    // Make the same guide available from Settings, without the first-run checkbox.
-    const librarySection = document.querySelector('.steal-settings-section:has(#steal-clear)');
-    if (librarySection) {
-        const row = document.createElement('div');
-        row.className = 'steal-settings-row';
-        row.innerHTML = '<div><strong>Getting started</strong><small>Open the NM Audio welcome guide again.</small></div><button type="button" class="nm-guide-settings-button">Open guide</button>';
-        row.querySelector('button').addEventListener('click', () => openWelcomeGuide({ showDontShowAgain: false }));
-        librarySection.appendChild(row);
+    // Add a dedicated Guide section to the Settings dialog.
+    const settingsContent = document.querySelector('.steal-settings-content');
+    if (settingsContent && !settingsContent.querySelector('.nm-guide-settings-section')) {
+        const guideSection = document.createElement('div');
+        guideSection.className = 'steal-settings-section nm-guide-settings-section';
+        guideSection.innerHTML = '<h3>Guide</h3><div class="steal-settings-row"><div><strong>Welcome guide</strong><small>Reopen the NM Audio tutorial at any time.</small></div><button type="button" class="nm-guide-settings-button">Open guide</button></div>';
+        guideSection.querySelector('button').addEventListener('click', () => openWelcomeGuide({ showDontShowAgain: false }));
+        settingsContent.appendChild(guideSection);
     }
 
     window.openWelcomeGuide = openWelcomeGuide;
 
     if (readPrefs()[GUIDE_KEY] !== true) {
-        // Defer until layout/scripts have completed so the welcome dialog can take focus safely.
         requestAnimationFrame(() => openWelcomeGuide({ showDontShowAgain: true }));
     }
 })();
