@@ -1,9 +1,9 @@
-/* Steal a Song settings panel and local preferences. */
+/* NM Audio settings panel and local preferences. */
 (() => {
     'use strict';
 
-    const STORAGE_KEY = 'steal-a-song-preferences';
-    const DB_NAME = 'steal-a-song-library';
+    const STORAGE_KEY = 'nm-audio-preferences';
+    const DB_NAME = 'nm-audio-library';
 
     document.documentElement.classList.add('dark');
     document.documentElement.style.colorScheme = 'dark';
@@ -37,23 +37,23 @@
     const launcher = document.createElement('button');
     launcher.type = 'button';
     launcher.className = 'steal-settings-launcher';
-    launcher.setAttribute('aria-label', 'Open Steal a Song settings');
+    launcher.setAttribute('aria-label', 'Open NM Audio settings');
     launcher.innerHTML = '<span aria-hidden="true">⚙</span><span>Settings</span>';
 
     const backdrop = document.createElement('div');
     backdrop.className = 'steal-settings-backdrop';
     backdrop.innerHTML = `
       <section class="steal-settings-window" role="dialog" aria-modal="true" aria-labelledby="steal-settings-heading">
-        <header class="steal-settings-titlebar"><span style="color:#a1a1aa;font-size:12px">Steal a Song Preferences</span><button type="button" class="steal-settings-close" aria-label="Close settings">×</button></header>
+        <header class="steal-settings-titlebar"><span style="color:#a1a1aa;font-size:12px">NM Audio Preferences</span><button type="button" class="steal-settings-close" aria-label="Close settings">×</button></header>
         <div class="steal-settings-content">
-          <h2 id="steal-settings-heading">Settings</h2><p class="steal-settings-intro">Personalize Steal a Song. Preferences are saved in this browser.</p>
+          <h2 id="steal-settings-heading">Settings</h2><p class="steal-settings-intro">Personalize NM Audio. Preferences are saved in this browser.</p>
           <div class="steal-settings-section"><h3>Accessibility</h3>
             <div class="steal-settings-row"><div><strong>Reduce motion</strong><small>Limit decorative animation and transitions.</small></div><button type="button" id="steal-motion" class="steal-settings-action">Enable</button></div>
           </div>
           <div class="steal-settings-section"><h3>Playback</h3>
             <div class="steal-settings-row"><div><strong>Visualizer</strong><small>Choose the display used by the audio deck.</small></div><select id="steal-visualizer" class="steal-settings-control"><option value="bars">Spectrum</option><option value="wave">Waveform</option><option value="mirror">Dual mirror</option></select></div>
             <div class="steal-settings-row"><div><strong>Track crossfade</strong><small>Default transition duration between tracks.</small></div><select id="steal-crossfade" class="steal-settings-control"><option value="0">Off</option><option value="1">1 second</option><option value="2">2 seconds</option><option value="3">3 seconds</option><option value="4">4 seconds</option><option value="5">5 seconds</option><option value="6">6 seconds</option><option value="7">7 seconds</option><option value="8">8 seconds</option></select></div>
-            <div class="steal-settings-row"><div><strong>Default volume</strong><small>Volume used when opening Steal a Song.</small></div><select id="steal-volume" class="steal-settings-control"><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option></select></div>
+            <div class="steal-settings-row"><div><strong>Default volume</strong><small>Volume used when opening NM Audio.</small></div><select id="steal-volume" class="steal-settings-control"><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option></select></div>
           </div>
           <div class="steal-settings-section"><h3>Local music library</h3>
             <div class="steal-settings-row"><div><strong>Browser storage</strong><small id="steal-storage">Checking local storage…</small></div><button type="button" id="steal-refresh" class="steal-settings-action">Refresh</button></div>
@@ -96,7 +96,7 @@
     backdrop.querySelector('#steal-reset').addEventListener('click',()=>{try{localStorage.removeItem(STORAGE_KEY)}catch(_){}});
     backdrop.querySelector('#steal-clear').addEventListener('click',()=>confirm.classList.add('is-open'));
     confirm.querySelector('#steal-clear-cancel').addEventListener('click',()=>confirm.classList.remove('is-open'));
-    confirm.querySelector('#steal-clear-confirm').addEventListener('click',()=>{const request=indexedDB.deleteDatabase(DB_NAME);request.onsuccess=()=>location.reload();request.onerror=()=>{storage.textContent='Could not clear the library.';confirm.classList.remove('is-open')};request.onblocked=()=>{storage.textContent='Close other Steal a Song tabs before clearing.';confirm.classList.remove('is-open')}});
+    confirm.querySelector('#steal-clear-confirm').addEventListener('click',()=>{const request=indexedDB.deleteDatabase(DB_NAME);request.onsuccess=()=>location.reload();request.onerror=()=>{storage.textContent='Could not clear the library.';confirm.classList.remove('is-open')};request.onblocked=()=>{storage.textContent='Close other NM Audio tabs before clearing.';confirm.classList.remove('is-open')}});
 
     document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventEvent?.();backdrop.classList.contains('is-open')?closePanel():open()}if(e.key==='Escape')backdrop.classList.contains('is-open')&&closePanel()});
 
@@ -107,23 +107,23 @@
     // Replace lines 107–116 with:
 function renameApp(root = document) {
     if (document.title.includes('AetherStudio') || document.title.includes('AtherStudio')) {
-        document.title = 'Steal a Song — Local Audio Remix & DJ Deck';
+        document.title = 'NM Audio — Local Audio Remix & DJ Deck';
     }
 
     const title = document.querySelector('h1');
     if (title && /(AetherStudio|AtherStudio)/i.test(title.textContent)) {
-        title.textContent = 'Steal a Song';
+        title.textContent = 'NM Audio';
     }
 
     if (root.nodeType === Node.TEXT_NODE) {
-        root.nodeValue = root.nodeValue.replace(/AetherStudio|AtherStudio/g, 'Steal a Song');
+        root.nodeValue = root.nodeValue.replace(/AetherStudio|AtherStudio/g, 'NM Audio');
         return;
     }
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
         walker.currentNode.nodeValue =
-            walker.currentNode.nodeValue.replace(/AetherStudio|AtherStudio/g, 'Steal a Song');
+            walker.currentNode.nodeValue.replace(/AetherStudio|AtherStudio/g, 'NM Audio');
     }
 }
 
