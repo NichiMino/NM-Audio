@@ -1,6 +1,6 @@
-# Steal a Song
+# NM Audio
 
-Steal a Song is an ad-free music player and remixing platform that gives you full control over how you listen to and customize your audio. Upload your favorite tracks, organize them into playlists, and apply custom styles or remixes on the fly.
+NM Audio is an ad-free music player and remixing platform that gives you full control over how you listen to and customize your audio. Upload your favorite tracks, organize them into playlists, and apply custom styles or remixes on the fly.
 
 ## Features
 
